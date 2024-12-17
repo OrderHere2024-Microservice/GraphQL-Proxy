@@ -28,4 +28,4 @@ resilience4j:
         maxWaitDuration: 500ms
 
 targetUrl:
-  monolithicService: http://localhost:8080/graphql
+  monolithicService: ${MONOLITHIC_SERVICE_URL:http://localhost:8080/graphql}
