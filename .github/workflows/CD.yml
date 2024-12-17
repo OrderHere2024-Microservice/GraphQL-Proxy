@@ -1,0 +1,91 @@
+name: CD
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  CI:
+    uses: ./.github/workflows/CI.yml
+
+  CD:
+    runs-on: ubuntu-latest
+    needs: CI
+    environment: CD
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          audience: ${{ secrets.AUDIENCE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set dynamic image tag
+        id: image_tag
+        run: |
+          TAG=$(echo "${{ github.ref }}" | sed 's|refs/heads/||' | tr '/' '-')
+          IMAGE_TAG="${TAG}-${{ github.sha }}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+
+      - name: Build, tag, and push Docker image to Amazon ECR
+        run: |
+          ECR_REPO=${{ secrets.ECR_REPOSITORY }}
+          IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${ECR_REPO}:${{ env.IMAGE_TAG }}
+          
+          docker build -t ${IMAGE_URI} .
+          docker push ${IMAGE_URI}
+
+      - name: Output image URI
+        run: |
+          echo "Docker image pushed to: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+
+      - name: Determine ECS Service based on branch
+        id: determine-ecs
+        run: |
+          echo "ECS_SERVICE=${{ secrets.ECS_SERVICE_PROD }}" >> $GITHUB_ENV
+
+      - name: Update ECS Service with new image
+        run: |
+          ECS_CLUSTER=${{ secrets.ECS_CLUSTER }}
+          ECS_SERVICE=${{ env.ECS_SERVICE }}
+
+          TASK_DEFINITION_ARN=$(aws ecs describe-services --cluster $ECS_CLUSTER --services $ECS_SERVICE --query 'services[0].taskDefinition' --output text)
+
+          CONTAINER_DEFINITIONS=$(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.containerDefinitions' --output json)
+
+          UPDATED_CONTAINER_DEFINITIONS=$(echo $CONTAINER_DEFINITIONS | jq --arg IMAGE_URI "${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}" '.[0].image = $IMAGE_URI')
+
+          TASK_FAMILY=$(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.family' --output text)
+          REQUIRES_COMPATIBILITIES=$(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.requiresCompatibilities' --output json)
+
+          NEW_TASK_DEFINITION_ARN=$(aws ecs register-task-definition \
+            --family $TASK_FAMILY \
+            --execution-role-arn $(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.executionRoleArn' --output text) \
+            --network-mode $(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.networkMode' --output text) \
+            --container-definitions "$UPDATED_CONTAINER_DEFINITIONS" \
+            --requires-compatibilities "$REQUIRES_COMPATIBILITIES" \
+            --cpu $(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.cpu' --output text) \
+            --memory $(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.memory' --output text) \
+            --task-role-arn $(aws ecs describe-task-definition --task-definition $TASK_DEFINITION_ARN --query 'taskDefinition.taskRoleArn' --output text) \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          echo "New task definition registered: $NEW_TASK_DEFINITION_ARN"
+
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --task-definition $NEW_TASK_DEFINITION_ARN \
+            --force-new-deployment
