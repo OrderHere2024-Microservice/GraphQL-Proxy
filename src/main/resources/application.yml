@@ -1,6 +1,8 @@
 spring:
   application:
     name: GraphQLProxy
+  profiles:
+    active: default
 
 server:
   port: 4000
