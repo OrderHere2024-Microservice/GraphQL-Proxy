@@ -31,7 +31,6 @@ public class WebConfig {
                     .contextWrite(Context.of("AWSXRaySegment", segment))
                     .doFinally(signalType -> {
                         if (AWSXRay.getCurrentSegmentOptional().isPresent()) {
-                            System.out.println("Proxy: Ending segment: " + segment.getTraceId());
                             AWSXRay.endSegment();
                         }
                     });

@@ -1,6 +1,5 @@
 package com.orderhere.GraphQLProxy.controller;
 
-import com.amazonaws.xray.AWSXRay;
 import com.amazonaws.xray.entities.Segment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,12 +38,6 @@ public class GraphQLProxyController {
             String traceHeader = segment != null
                     ? String.format("Root=%s;Parent=%s;Sampled=1", segment.getTraceId(), segment.getId())
                     : null;
-
-            if (traceHeader != null) {
-                logger.info("Proxy: Forwarding X-Amzn-Trace-Id: {}", traceHeader);
-            } else {
-                logger.warn("Proxy: No X-Ray segment found, unable to forward trace ID.");
-            }
 
             return webClient.post()
                     .uri(monolithicServiceUrl)
