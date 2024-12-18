@@ -37,7 +37,6 @@ public class WebConfig {
         };
     }
 
-
     @Bean
     public AWSXRayRecorder configureXRayRecorder() {
         AWSXRayRecorder recorder = AWSXRay.getGlobalRecorder();
