@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.util.Set;
+
 @Controller
 @RequestMapping("/graphql")
 public class GraphQLProxyController {
@@ -23,6 +25,12 @@ public class GraphQLProxyController {
     @Value("${targetUrl.monolithicService}")
     private String monolithicServiceUrl;
 
+    @Value("${targetUrl.dishService}")
+    private String dishServiceUrl;
+
+    private static final Set<String> DISH_SERVICE_QUERIES = Set.of("getCategories", "findIngredientsByDishID", "getIngredientById", "getDishes",
+            "getDishesByCategory", "createCategory", "createLinkIngredientDish", "deleteIngredientLink", "updateIngredient", "deleteDish");
+
     public GraphQLProxyController(WebClient.Builder webClientBuilder) {
         this.webClient = webClientBuilder.build();
     }
@@ -32,6 +40,14 @@ public class GraphQLProxyController {
             @RequestBody String query,
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
     ) {
+        logger.info("Received GraphQL Request: {}", query);
+
+        String targetUrl = DISH_SERVICE_QUERIES.stream().anyMatch(query::contains)
+                ? dishServiceUrl
+                : monolithicServiceUrl;
+
+        logger.info("Forwarding request to: {}", targetUrl);
+
         return Mono.deferContextual(context -> {
             Segment segment = context.getOrDefault("AWSXRaySegment", null);
 
@@ -40,7 +56,7 @@ public class GraphQLProxyController {
                     : null;
 
             return webClient.post()
-                    .uri(monolithicServiceUrl)
+                    .uri(targetUrl)
                     .contentType(MediaType.APPLICATION_JSON)
                     .header(HttpHeaders.AUTHORIZATION, authHeader != null ? authHeader : "")
                     .header("X-Amzn-Trace-Id", traceHeader != null ? traceHeader : "") // Add trace header
