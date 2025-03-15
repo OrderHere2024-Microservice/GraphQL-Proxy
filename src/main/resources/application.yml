@@ -30,3 +30,4 @@ resilience4j:
 targetUrl:
   monolithicService: ${MONOLITHIC_SERVICE_URL:http://localhost:8080/graphql}
   dishService: ${DISH_SERVICE_URL:http://localhost:8090/graphql}
+  paymentService: ${PAYMENT_SERVICE_URL:http://localhost:9010/graphql}

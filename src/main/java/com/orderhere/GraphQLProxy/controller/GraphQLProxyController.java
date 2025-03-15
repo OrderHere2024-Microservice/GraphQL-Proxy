@@ -1,6 +1,7 @@
 package com.orderhere.GraphQLProxy.controller;
 
 import com.amazonaws.xray.entities.Segment;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.util.Map;
 import java.util.Set;
 
 @Controller
@@ -28,8 +30,23 @@ public class GraphQLProxyController {
     @Value("${targetUrl.dishService}")
     private String dishServiceUrl;
 
+    @Value("${targetUrl.paymentService}")
+    private String paymentServiceUrl;
+
     private static final Set<String> DISH_SERVICE_QUERIES = Set.of("getCategories", "findIngredientsByDishID", "getIngredientById", "getDishes",
             "getDishesByCategory", "createCategory", "createLinkIngredientDish", "deleteIngredientLink", "updateIngredient", "deleteDish");
+
+    private static final Set<String> PAYMENT_SERVICE_QUERIES = Set.of("createPayment", "getPaymentResult");
+
+    private Map<String, Set<String>> serviceQueryMap;
+
+    @PostConstruct
+    private void initializeServiceQueryMap() {
+        serviceQueryMap = Map.of(
+                dishServiceUrl, DISH_SERVICE_QUERIES,
+                paymentServiceUrl, PAYMENT_SERVICE_QUERIES
+        );
+    }
 
     public GraphQLProxyController(WebClient.Builder webClientBuilder) {
         this.webClient = webClientBuilder.build();
@@ -42,9 +59,11 @@ public class GraphQLProxyController {
     ) {
         logger.info("Received GraphQL Request: {}", query);
 
-        String targetUrl = DISH_SERVICE_QUERIES.stream().anyMatch(query::contains)
-                ? dishServiceUrl
-                : monolithicServiceUrl;
+        String targetUrl = serviceQueryMap.entrySet().stream()
+                .filter(entry -> entry.getValue().stream().anyMatch(query::contains))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(monolithicServiceUrl);
 
         logger.info("Forwarding request to: {}", targetUrl);
 
